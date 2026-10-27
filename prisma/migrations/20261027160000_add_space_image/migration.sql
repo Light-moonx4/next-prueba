@@ -1,0 +1,1 @@
+ALTER TABLE "Space" ADD COLUMN "imageUrl" TEXT;
