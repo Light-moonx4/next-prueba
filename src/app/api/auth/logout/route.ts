@@ -7,11 +7,11 @@ import { verifyRefreshToken } from '@/features/auth/tokens';
 function clearAuthCookies(response: NextResponse) {
   response.cookies.set({
     name: 'accessToken', value: '', expires: new Date(0), maxAge: 0,
-    httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/',
+    httpOnly: true, secure: true, sameSite: 'lax', path: '/',
   });
   response.cookies.set({
     name: 'refreshToken', value: '', expires: new Date(0), maxAge: 0,
-    httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/',
+    httpOnly: true, secure: true, sameSite: 'lax', path: '/',
   });
 }
 

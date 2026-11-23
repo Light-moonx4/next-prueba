@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import useSWR from 'swr';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/i18n/LanguageContext';
 
@@ -11,8 +12,11 @@ function getLocalDateString(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
+const fetcher = (url: string) =>
+  fetch(url, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : []));
+
 export default function BookingFormClient({ spaceId, pricePerHour }: { spaceId: string; pricePerHour: number }) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const router = useRouter();
   const [date, setDate] = useState('');
   const [startTime, setStartTime] = useState('08:00');
@@ -20,6 +24,27 @@ export default function BookingFormClient({ spaceId, pricePerHour }: { spaceId: 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const { data: ocupados, mutate } = useSWR<{ startTime: string; endTime: string }[]>(
+    `/api/spaces/${spaceId}/availability`,
+    fetcher,
+    { refreshInterval: 5000 },
+  );
+  const ocupadosDelDia =
+    date && Array.isArray(ocupados)
+      ? ocupados.filter((b) => getLocalDateString(new Date(b.startTime)) === date)
+      : [];
+  const selStart = date ? new Date(`${date}T${startTime}:00`) : null;
+  const selEnd = date ? new Date(`${date}T${endTime}:00`) : null;
+  const hasConflict = Boolean(
+    selStart &&
+      selEnd &&
+      selEnd > selStart &&
+      Array.isArray(ocupados) &&
+      ocupados.some((b) => new Date(b.startTime) < selEnd && new Date(b.endTime) > selStart),
+  );
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString(language === 'en' ? 'en-US' : 'es-CO', { hour: '2-digit', minute: '2-digit' });
 
   // Cálculo estimado de horas y precio en cliente (la validación real y final ocurre en servidor)
   const getEstimatedTotal = () => {
@@ -75,6 +100,7 @@ export default function BookingFormClient({ spaceId, pricePerHour }: { spaceId: 
       const data = await res.json();
 
       if (!res.ok) {
+        if (res.status === 409) mutate();
         const ruleMessages: Record<string, string> = {
           BOOKING_IN_PAST: t.booking.pastDate,
           BOOKING_TOO_FAR_AHEAD: t.booking.tooFarAhead,
@@ -86,6 +112,7 @@ export default function BookingFormClient({ spaceId, pricePerHour }: { spaceId: 
       }
 
       setSuccess(t.booking.successMsg);
+      mutate();
       setTimeout(() => {
         router.push('/dashboard');
         router.refresh();
@@ -143,6 +170,18 @@ export default function BookingFormClient({ spaceId, pricePerHour }: { spaceId: 
         </div>
       </div>
 
+      {ocupadosDelDia.length > 0 && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/40 text-amber-300 rounded-lg text-sm">
+          {language === 'en' ? 'Booked that day: ' : 'Ocupado ese día: '}
+          {ocupadosDelDia.map((b) => `${fmt(b.startTime)}–${fmt(b.endTime)}`).join(', ')}
+        </div>
+      )}
+      {hasConflict && (
+        <div className="p-3 bg-red-500/20 border border-red-500 text-red-300 rounded-lg text-sm">
+          {language === 'en' ? 'That time slot is already booked.' : 'Ese horario ya está reservado.'}
+        </div>
+      )}
+
       <div className="pt-2 border-t border-[var(--surface-border)] flex justify-between items-center">
         <span className="text-sm text-[var(--muted-foreground)]">{t.booking.totalEstimated}</span>
         <span className="text-xl font-bold text-cyan-400">${getEstimatedTotal()}</span>
@@ -150,7 +189,7 @@ export default function BookingFormClient({ spaceId, pricePerHour }: { spaceId: 
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || hasConflict}
         className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-xl transition shadow-lg shadow-cyan-900/20 disabled:opacity-50"
       >
         {loading ? t.booking.processingBtn : t.booking.confirmBtn}

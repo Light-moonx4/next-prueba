@@ -47,7 +47,7 @@ export async function POST() {
     const response = NextResponse.json({ message: 'Token renovado con éxito', user });
     response.cookies.set('accessToken', newAccessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: true,
       sameSite: 'lax',
       path: '/',
       maxAge: 15 * 60,

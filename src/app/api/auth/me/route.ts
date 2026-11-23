@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { getAccessTokenPayload } from '@/features/auth/session';
-
 export async function GET() {
   try {
     const cookieStore = await cookies();
