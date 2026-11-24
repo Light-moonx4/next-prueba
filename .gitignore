@@ -10,6 +10,7 @@
 # Local environment files and secrets
 .env
 .env.*
+.env.*local
 !.env.example
 
 # Logs
