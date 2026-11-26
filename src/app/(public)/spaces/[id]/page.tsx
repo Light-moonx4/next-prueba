@@ -2,6 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { notFound } from 'next/navigation';
 import SpaceDetailClient from '@/features/spaces/components/SpaceDetailClient';
 import { Suspense } from 'react';
+import { resolveSpaceImageUrl } from '@/features/spaces/image';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -26,5 +27,5 @@ async function SpaceDetailData({ params }: PageProps) {
     notFound();
   }
 
-  return <SpaceDetailClient space={{ ...space, pricePerHour: Number(space.pricePerHour) }} />;
+  return <SpaceDetailClient space={{ ...space, imageUrl: await resolveSpaceImageUrl(space.imageUrl), pricePerHour: Number(space.pricePerHour) }} />;
 }

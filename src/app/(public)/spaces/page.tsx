@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { prisma } from '@/lib/prisma';
 import SpacesCatalogClient from '@/features/spaces/components/SpacesCatalogClient';
+import { resolveSpaceImages } from '@/features/spaces/image';
 
 export default function SpacesPage() {
   return (
@@ -11,9 +12,10 @@ export default function SpacesPage() {
 }
 
 async function SpacesList() {
-  const spaces = await prisma.space.findMany({
+  const records = await prisma.space.findMany({
     where: { isActive: true },
   });
+  const spaces = await resolveSpaceImages(records);
 
   return <SpacesCatalogClient spaces={spaces.map((space) => ({ ...space, pricePerHour: Number(space.pricePerHour) }))} />;
 }

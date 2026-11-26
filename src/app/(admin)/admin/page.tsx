@@ -16,28 +16,7 @@ interface Space {
   imageUrl: string | null;
 }
 
-function readImageFile(file: File): Promise<string> {
-  if (!file.type.startsWith('image/')) return Promise.reject(new Error('invalid-image'));
-  if (file.size > 5 * 1024 * 1024) return Promise.reject(new Error('image-too-large'));
-  return createImageBitmap(file).then((bitmap) => {
-    const scale = Math.min(1, 1280 / bitmap.width, 800 / bitmap.height);
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('invalid-image');
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('invalid-image')), 'image/jpeg', 0.78));
-  }).then((blob) => new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('invalid-image'));
-    reader.onerror = () => reject(new Error('invalid-image'));
-    reader.readAsDataURL(blob);
-  }));
-}
+type SavedImage = { key: string; url: string };
 
 export default function AdminPage() {
   const { t, language } = useLanguage();
@@ -64,8 +43,17 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [savingImageId, setSavingImageId] = useState<string | null>(null);
   const [imageDrafts, setImageDrafts] = useState<Record<string, string>>({});
+  const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
   const [translationDrafts, setTranslationDrafts] = useState<Record<string, { nameEn: string; descriptionEn: string }>>({});
   const [savingTranslationId, setSavingTranslationId] = useState<string | null>(null);
+
+  const refreshSavedImages = async () => {
+    const response = await fetch('/api/fotos');
+    if (!response.ok) return;
+    const data = await response.json() as { images: SavedImage[] };
+    setSavedImages(data.images);
+  };
 
   const fetchSpaces = async () => {
     try {
@@ -94,6 +82,39 @@ export default function AdminPage() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [t.admin.loadError]);
+
+  useEffect(() => {
+    refreshSavedImages()
+      .then(() => undefined)
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'No se pudieron cargar las imágenes guardadas'));
+  }, []);
+
+  const uploadImage = async (file: File | undefined, onSelect: (key: string) => void) => {
+    if (!file) return;
+    setUploadingImage(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.set('foto', file);
+      const response = await fetch('/api/fotos', { method: 'POST', body: formData });
+      const data = await response.json() as { key?: string; error?: string };
+      if (!response.ok || !data.key) throw new Error(data.error || t.admin.imageSaveError);
+      const signedResponse = await fetch('/api/fotos');
+      if (signedResponse.ok) {
+        const images = await signedResponse.json() as { images: SavedImage[] };
+        setSavedImages(images.images);
+      }
+      onSelect(data.key);
+      setSuccess(t.admin.imageSaved);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t.admin.invalidImage);
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const previewImageUrl = (value: string | null) =>
+    savedImages.find((image) => image.key === value)?.url ?? value;
 
   const handleCreateSpace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,6 +150,7 @@ export default function AdminPage() {
       setDescriptionEn('');
       setImageUrl('');
       setPricePerHour('');
+      await refreshSavedImages();
       fetchSpaces();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t.admin.createError);
@@ -174,6 +196,7 @@ export default function AdminPage() {
       if (!response.ok) throw new Error(data.error || t.admin.imageSaveError);
       setSuccess(t.admin.imageSaved);
       await fetchSpaces();
+      await refreshSavedImages();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t.admin.imageSaveError);
     } finally {
@@ -203,16 +226,6 @@ export default function AdminPage() {
       setError(err instanceof Error ? err.message : t.admin.translationSaveError);
     } finally {
       setSavingTranslationId(null);
-    }
-  };
-
-  const handleImageFile = async (file: File | undefined, onRead: (image: string) => void) => {
-    if (!file) return;
-    try {
-      onRead(await readImageFile(file));
-    } catch (err: unknown) {
-      const key = err instanceof Error ? err.message : 'invalid-image';
-      setError(key === 'image-too-large' ? t.admin.imageTooLarge : t.admin.invalidImage);
     }
   };
 
@@ -303,18 +316,23 @@ export default function AdminPage() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-slate-300 mb-1">{t.admin.imageUrl}</label>
+            <label className="block text-sm font-medium text-slate-300 mb-1">{t.admin.imageUrl} (URL existente o clave S3)</label>
             <input
               type="text"
               inputMode="url"
               value={imageUrl}
               onChange={(e) => setImageUrl(e.target.value)}
-              placeholder={t.admin.imageUrlPlaceholder}
+              placeholder="fotos/<uuid>.jpg"
               className="w-full px-4 py-2 bg-slate-800 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-amber-500"
             />
-            <label className="mt-2 block text-xs text-slate-400">
-              {t.admin.uploadImage}
-              <input type="file" accept="image/*" className="mt-1 block w-full text-sm" onChange={(event) => void handleImageFile(event.target.files?.[0], setImageUrl)} />
+            <label className="mt-3 block text-xs text-slate-300">Elegir imagen ya guardada en RDS</label>
+            <select value={savedImages.some((image) => image.key === imageUrl) ? imageUrl : ''} onChange={(event) => setImageUrl(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100">
+              <option value="">Seleccionar una clave existente</option>
+              {savedImages.map((image) => <option key={image.key} value={image.key}>{image.key}</option>)}
+            </select>
+            <label className="mt-3 block text-xs text-slate-400">
+              {t.admin.uploadImage} (JPG, PNG o WEBP; máximo 5 MB)
+              <input type="file" accept="image/jpeg,image/png,image/webp" className="mt-1 block w-full text-sm" disabled={uploadingImage} onChange={(event) => void uploadImage(event.target.files?.[0], setImageUrl)} />
             </label>
           </div>
 
@@ -342,7 +360,7 @@ export default function AdminPage() {
                 key={space.id}
                 className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between shadow-xl"
               >
-                {space.imageUrl && <Image src={space.imageUrl} alt={space.name} width={720} height={360} unoptimized className="mb-4 h-36 w-full rounded-xl object-cover" />}
+                {previewImageUrl(space.imageUrl) && <Image src={previewImageUrl(space.imageUrl)!} alt={space.name} width={720} height={360} unoptimized className="mb-4 h-36 w-full rounded-xl object-cover" />}
                 <div>
                   <div className="flex justify-between items-center mb-2">
                     <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
@@ -387,18 +405,23 @@ export default function AdminPage() {
                 </div>
 
                 <div className="mt-4 space-y-2">
-                  <label className="block text-xs font-medium text-slate-300">{t.admin.imageUrl}</label>
+                  <label className="block text-xs font-medium text-slate-300">{t.admin.imageUrl} (URL existente o clave S3)</label>
                   <input
                     type="text"
                     inputMode="url"
                     value={imageDrafts[space.id] ?? space.imageUrl ?? ''}
                     onChange={(event) => setImageDrafts((drafts) => ({ ...drafts, [space.id]: event.target.value }))}
-                    placeholder={t.admin.imageUrlPlaceholder}
+                    placeholder="fotos/<uuid>.jpg"
                     className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100"
                   />
+                  <label className="block text-xs font-medium text-slate-300">Elegir imagen ya guardada en RDS</label>
+                  <select value={savedImages.some((image) => image.key === (imageDrafts[space.id] ?? space.imageUrl)) ? imageDrafts[space.id] ?? space.imageUrl ?? '' : ''} onChange={(event) => setImageDrafts((drafts) => ({ ...drafts, [space.id]: event.target.value }))} className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100">
+                    <option value="">Seleccionar una clave existente</option>
+                    {savedImages.map((image) => <option key={image.key} value={image.key}>{image.key}</option>)}
+                  </select>
                   <label className="block text-xs text-slate-400">
-                    {t.admin.uploadImage}
-                    <input type="file" accept="image/*" className="mt-1 block w-full text-sm" onChange={(event) => void handleImageFile(event.target.files?.[0], (image) => setImageDrafts((drafts) => ({ ...drafts, [space.id]: image })))} />
+                    {t.admin.uploadImage} (JPG, PNG o WEBP; máximo 5 MB)
+                    <input type="file" accept="image/jpeg,image/png,image/webp" className="mt-1 block w-full text-sm" disabled={uploadingImage} onChange={(event) => void uploadImage(event.target.files?.[0], (key) => setImageDrafts((drafts) => ({ ...drafts, [space.id]: key })))} />
                   </label>
                   <button
                     type="button"

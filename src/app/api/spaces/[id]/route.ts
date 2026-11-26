@@ -1,40 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import jwt from 'jsonwebtoken';
-import { cookies } from 'next/headers';
 import { parseSpaceImageUrl } from '@/features/spaces/image';
-
-const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'access_secret_key_change_me';
-
-// Función auxiliar para verificar rol de administrador
-async function verifyAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('accessToken')?.value;
-  if (!token) return null;
-
-  try {
-    const payload = jwt.verify(token, ACCESS_SECRET) as jwt.JwtPayload & { role?: string; userId?: string };
-    if (payload.role !== 'ADMIN') return null;
-    return payload;
-  } catch {
-    return null;
-  }
-}
+import { authorizeAdmin } from '@/features/auth/admin';
 
 // PUT: Editar espacio (Solo ADMIN)
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const admin = await verifyAdmin();
-    if (!admin) {
-      return NextResponse.json({ error: 'No autorizado o sin privilegios de administrador' }, { status: 403 });
-    }
+    const authorization = await authorizeAdmin();
+    if (!authorization.ok) return NextResponse.json({ error: authorization.error }, { status: authorization.status });
 
     const { id } = await params;
     const { name, nameEn, description, descriptionEn, pricePerHour, type, isActive, imageUrl } = await request.json();
 
     const parsedImage = imageUrl === undefined ? null : parseSpaceImageUrl(imageUrl);
     if (parsedImage && !parsedImage.valid) {
-      return NextResponse.json({ error: 'La imagen debe ser una URL válida o una imagen de hasta 2 MB.' }, { status: 400 });
+      return NextResponse.json({ error: 'La imagen debe ser una URL válida, una clave S3 válida o una imagen base64 de hasta 2 MB.' }, { status: 400 });
     }
 
     // Regla 13: Validar reservas futuras si se intenta desactivar el espacio
@@ -79,10 +59,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 // PATCH / DELETE: Desactivar espacio (Regla 12: No se elimina, se desactiva)[cite: 4]
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const admin = await verifyAdmin();
-    if (!admin) {
-      return NextResponse.json({ error: 'No autorizado o sin privilegios de administrador' }, { status: 403 });
-    }
+    const authorization = await authorizeAdmin();
+    if (!authorization.ok) return NextResponse.json({ error: authorization.error }, { status: authorization.status });
 
     const { id } = await params;
 

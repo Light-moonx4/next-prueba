@@ -1,19 +1,26 @@
-import { NextResponse } from "next/server";
-import { subirFoto } from "@/lib/s3/upload"; // ajusta la ruta si tu proyecto no usa @/ o si está en src/
-
-
-const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+import { NextResponse } from 'next/server';
+import { subirFoto } from '@/lib/s3/upload';
+import { prisma } from '@/lib/prisma';
+import { authorizeAdmin } from '@/features/auth/admin';
+import { obtenerUrlImagen } from '@/lib/s3/signed-url';
+import { isS3ImageKey } from '@/features/spaces/image';
+const MAX_BYTES = 5 * 1024 * 1024;
 
 const TIPOS_PERMITIDOS: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
 };
 
 export async function POST(req: Request) {
   try {
+    const authorization = await authorizeAdmin();
+    if (!authorization.ok) {
+      return NextResponse.json({ error: authorization.error }, { status: authorization.status });
+    }
+
     const formData = await req.formData();
-    const file = formData.get("foto");
+    const file = formData.get('foto');
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -53,5 +60,28 @@ export async function POST(req: Request) {
       { error: "No se pudo subir el archivo" },
       { status: 500 }
     );
+  }
+}
+
+export async function GET() {
+  try {
+    const authorization = await authorizeAdmin();
+    if (!authorization.ok) {
+      return NextResponse.json({ error: authorization.error }, { status: authorization.status });
+    }
+
+    const spaces = await prisma.space.findMany({
+      where: { imageUrl: { startsWith: 'fotos/' } },
+      select: { imageUrl: true },
+    });
+    const keys = [...new Set(spaces.map(({ imageUrl }) => imageUrl).filter(
+      (key): key is string => key !== null && isS3ImageKey(key),
+    ))];
+    const images = await Promise.all(keys.map(async (key) => ({ key, url: await obtenerUrlImagen(key) })));
+
+    return NextResponse.json({ images }, { headers: { 'Cache-Control': 'private, no-store' } });
+  } catch (error) {
+    console.error('Error al listar imágenes guardadas:', error);
+    return NextResponse.json({ error: 'No se pudieron listar las imágenes' }, { status: 500 });
   }
 }
